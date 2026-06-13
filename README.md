@@ -1,334 +1,172 @@
 # DELA Muebles
 
-Sistema paramétrico para diseño, visualización y preparación de fabricación de muebles modulares.
+Sistema paramétrico para generar estanterías desde una entrada simple, validarlas y preparar el payload de fabricación.
 
-Incluye:
+El flujo actual parte de **presets** y de una sola CLI:
 
-- generación de modelos desde JSON
-- renders de producto con Blender
-- generación de piezas para fabricación
-- kerf real
-- layouts técnicos tipo póster
-- exportación de `.png`, `.blend` y `.glb`
+- `dvd`
+- `libros` con patrón `4_4`
+- `libros` con patrón `5_3`
 
 ---
 
-# 🧠 Concepto
+## Flujo oficial
 
-El proyecto separa claramente dos capas:
+### 1. Validar una spec
 
-1. **Visualización de producto**
-   - genera la estantería final
-   - renderiza vistas limpias
-   - exporta modelo 3D
+```powershell
+python -m app.cli validate examples/dvd.json
+```
 
-2. **Fabricación / kerf**
-   - genera piezas, tableros y cortes
-   - aplica kerf real
-   - compone layouts técnicos y ensamblado
+### 2. Construir outputs sin Blender
 
----
+Genera:
 
-# ⚙️ Pipeline real
+- `validated.json`
+- `fabrication.json`
 
-## A. Pipeline visual
+```powershell
+python -m app.cli build examples/dvd.json
+python -m app.cli build examples/libros_4_4.json
+python -m app.cli build examples/libros_5_3.json
+```
 
-```text
-examples/*.json
-→ app.cli generate
-→ Blender (generate_bookshelf.py)
-→ outputs/<modelo>/
-→ render_front.png + render_angle.png + .blend + .glb + JSON auxiliares
-````
+### 3. Construir outputs con Blender
 
-## B. Pipeline fabricación / kerf
+Genera además el render visual y el layout de fabricación.
 
-```text
-scripts/kerf_*.py
-→ outputs/kerf_<modelo>/<modelo>.json
-→ Blender (generate_kerf_layout.py)
-→ 01_board_layout.png
-→ 02_cut_parts.png
-→ 03_exploded_assembly.png
-→ 04_final_assembly.png
-→ 05_overview.png
-→ 06_final_assembly.blend
-→ 06_final_assembly.glb
+```powershell
+$blender = "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"
+
+python -m app.cli build examples/dvd.json --blender-exe $blender
+python -m app.cli build examples/libros_4_4.json --blender-exe $blender
+python -m app.cli build examples/libros_5_3.json --blender-exe $blender
+```
+
+### 4. Render visual solamente
+
+```powershell
+python -m app.cli generate examples/dvd.json --blender-exe $blender
 ```
 
 ---
 
-# 📁 Estructura del proyecto
+## Inputs simples
+
+### DVD
+
+```json
+{
+  "project_name": "dvd",
+  "preset": "dvd",
+  "render_contents": true
+}
+```
+
+### Libros 4_4
+
+```json
+{
+  "project_name": "libros_4_4",
+  "preset": "libros",
+  "pattern": "4_4",
+  "render_contents": true
+}
+```
+
+### Libros 5_3
+
+```json
+{
+  "project_name": "libros_5_3",
+  "preset": "libros",
+  "pattern": "5_3",
+  "render_contents": true
+}
+```
+
+---
+
+## Estructura relevante
 
 ```text
-examples/
-  *.json
-  # inputs paramétricos de los modelos
-
 app/
   cli.py
+  presets.py
+  spec_builder.py
+  fabrication.py
   validator.py
-  # entrada principal y validación
-
-scripts/
-  kerf_estanteria_dvds.py
-  kerf_estanteria_libros_4_4.py
-  kerf_estanteria_libros_5_3.py
-  # generación de piezas y fabrication JSON para kerf
 
 blender/
   generate_bookshelf.py
-  # render visual del mueble final
-
   generate_kerf_layout.py
-  # layouts técnicos, exploded assembly, final assembly y exports
 
-schemas/
-  bookshelf.schema.json
-
-outputs/
-  <modelo>/
-  kerf_<modelo>/
-  # resultados generados
+examples/
+  dvd.json
+  libros_4_4.json
+  libros_5_3.json
 ```
 
 ---
 
-# 🧱 Inputs
+## Qué hace cada módulo
 
-## Inputs visuales
-
-Se definen en:
-
-```text
-examples/*.json
-```
-
-Ejemplos actuales:
-
-* `estanteria_dvds.json`
-* `estanteria_dvds_con_dvds.json`
-* `estanteria_libros_mixta_4_4_160.json`
-* `estanteria_libros_mixta_4_4_160_con_libros.json`
-* `estanteria_libros_mixta_5_3_160.json`
-* `estanteria_libros_mixta_5_3_160_con_libros.json`
-
-## Inputs de fabricación
-
-Se generan con los scripts `kerf_*` y se guardan como:
-
-```text
-outputs/kerf_<modelo>/<modelo>.json
-```
-
-Ese JSON contiene:
-
-* cabina / dimensiones generales
-* piezas
-* tableros
-* cortes
-* kerf aplicado
-* layout industrial
-
-👉 Es la entrada directa de `blender/generate_kerf_layout.py`.
+- `app/presets.py`: catálogo de presets y patrones
+- `app/spec_builder.py`: transforma la spec simple en la spec visual legacy y en la request de fabricación
+- `app/validator.py`: valida la spec final contra schema
+- `app/fabrication.py`: genera `fabrication.json`
+- `app/cli.py`: entrada única de terminal
 
 ---
 
-# ✂️ Kerf
+## Salida esperada
 
-El sistema usa kerf real en la fase de fabricación.
-
-Valor actual:
+Por defecto los outputs se escriben en:
 
 ```text
-3 mm
+outputs/<project_name>/
 ```
 
-Referencia conceptual:
-
-```python
-(total_piezas - 1) * kerf
-```
-
-Se aplica en la separación efectiva entre piezas sobre tablero.
-
----
-
-# 🪵 Materiales
-
-## Estructura
-
-* tablero de pino / acabado pino
-* grosor estructural: **18 mm**
-
-## Traseras
-
-* panel trasero / MDF
-* grosor trasera: **5 mm**
-
----
-
-# 🖼 Outputs
-
-## Outputs del pipeline visual
-
-Por cada modelo generado con `app.cli generate`:
+Archivos mínimos:
 
 ```text
-outputs/<modelo>/
-  render_front.png
-  render_angle.png
-  <modelo>.blend
-  <modelo>.glb
+outputs/<project_name>/
   validated.json
-  layout_report.json
+  fabrication.json
 ```
 
-## Outputs del pipeline kerf
-
-Por cada modelo generado con `generate_kerf_layout.py`:
-
-```text
-outputs/kerf_<modelo>/
-  01_board_layout.png
-  02_cut_parts.png
-  03_exploded_assembly.png
-  04_final_assembly.png
-  05_overview.png
-  06_final_assembly.blend
-  06_final_assembly.glb
-  <modelo>.json
-```
+Si usas Blender, en esa misma carpeta aparecerán también los renders y exports adicionales.
 
 ---
 
-# ▶️ Uso
-
-## 1. Activar entorno
+## Instalación
 
 ```powershell
-cd C:\ruta\al\proyecto
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-$blender = "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
-```
-
-## 2. Generar modelo visual
-
-Ejemplo DVDs:
-
-```powershell
-python -m app.cli generate examples\estanteria_dvds.json --blender-exe $blender
-```
-
-Ejemplo libros 4x4:
-
-```powershell
-python -m app.cli generate examples\estanteria_libros_mixta_4_4_160.json --blender-exe $blender
-```
-
-Ejemplo libros 5x3:
-
-```powershell
-python -m app.cli generate examples\estanteria_libros_mixta_5_3_160.json --blender-exe $blender
-```
-
-## 3. Generar fabrication JSON para kerf
-
-```powershell
-python .\scripts\kerf_estanteria_dvds.py
-python .\scripts\kerf_estanteria_libros_4_4.py
-python .\scripts\kerf_estanteria_libros_5_3.py
-```
-
-## 4. Generar layouts kerf en Blender
-
-```powershell
-& $blender -b --python .\blender\generate_kerf_layout.py -- `
-.\outputs\kerf_estanteria_dvds\kerf_estanteria_dvds.json `
-.\outputs\kerf_estanteria_dvds
-```
-
-```powershell
-& $blender -b --python .\blender\generate_kerf_layout.py -- `
-.\outputs\kerf_estanteria_libros_4_4_160\kerf_estanteria_libros_4_4_160.json `
-.\outputs\kerf_estanteria_libros_4_4_160
-```
-
-```powershell
-& $blender -b --python .\blender\generate_kerf_layout.py -- `
-.\outputs\kerf_estanteria_libros_5_3_160\kerf_estanteria_libros_5_3_160.json `
-.\outputs\kerf_estanteria_libros_5_3_160
+pip install -r requirements.txt
 ```
 
 ---
 
-# 📦 Modelos actuales
+## Tests
 
-## DVDs
+Los tests mínimos de humo viven en `tests/test_cli_smoke.py`.
 
-* dimensiones exteriores: **2036 × 2000 × 200 mm**
-* pipeline visual operativo
-* pipeline kerf operativo
-* layouts técnicos generados
+Ejecución:
 
-## Libros 4×4
-
-* dimensiones exteriores: **1636 × 2000 × 300 mm**
-* pipeline visual operativo
-* pipeline kerf operativo
-* ajustes visuales menores
-
-## Libros 5×3
-
-* dimensiones exteriores: **1636 × 2000 × 300 mm**
-* pipeline visual operativo
-* pipeline kerf operativo
-* ajustes visuales menores
-
----
-
-# 🎯 Objetivo visual
-
-* estilo IKEA
-* renders limpios de catálogo
-* exploded assembly
-* cámaras ortográficas
-* posters técnicos de fabricación
-* colores semánticos por tipo de pieza
-
----
-
-# 🛠 Requisitos
-
-```text
-Python 3.11+
-Blender 4.5+
+```powershell
+python -m unittest discover -s tests -v
 ```
 
 ---
 
-# 🚧 Estado actual
+## Nota
 
-El proyecto ya permite:
+El repositorio todavía puede contener ejemplos legacy antiguos, pero la ruta recomendada y documentada es la del flujo nuevo con:
 
-* generar estanterías desde JSON
-* exportar `.blend` y `.glb`
-* renderizar vistas visuales
-* generar JSON de fabricación
-* producir layouts de kerf completos
-* crear exploded assembly y final assembly
-
-Pendiente / mejorable:
-
-* optimización adicional de composición visual
-* BOM automático
-* export CNC
-* optimización avanzada de corte
-
----
-
-# 📄 Licencia
-
-MIT
-
-````
+- `examples/dvd.json`
+- `examples/libros_4_4.json`
+- `examples/libros_5_3.json`
+- `python -m app.cli validate ...`
+- `python -m app.cli build ...`
