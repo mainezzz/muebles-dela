@@ -3,6 +3,8 @@ import json
 
 from jsonschema import Draft7Validator
 
+from app.spec_builder import SimpleSpecError, build_visual_spec
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -88,7 +90,12 @@ def validate_file(
     schema_path: Path = SCHEMA_PATH
 ) -> dict:
 
-    spec = load_json(spec_path)
+    raw_spec = load_json(spec_path)
+
+    try:
+        spec = build_visual_spec(raw_spec)
+    except SimpleSpecError as exc:
+        raise ValidationError(str(exc)) from exc
 
     schema = load_json(schema_path)
 
