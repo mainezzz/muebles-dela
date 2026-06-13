@@ -1,83 +1,98 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Normalized bookshelf visual specification",
   "type": "object",
   "required": [
     "project_name",
     "type",
     "units",
+    "content_type",
     "overall_dimensions",
+    "material",
     "structure",
-    "zones"
+    "construction",
+    "zones",
+    "solver",
+    "back_panel",
+    "visualization"
   ],
   "properties": {
-    "project_name": {
-      "type": "string"
-    },
-    "type": {
-      "type": "string"
-    },
-    "units": {
-      "type": "string"
-    },
+    "project_name": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "const": "bookshelf" },
+    "units": { "type": "string", "const": "mm" },
+    "content_type": { "type": "string", "enum": ["dvd", "books"] },
     "overall_dimensions": {
       "type": "object",
-      "required": [
-        "width",
-        "height",
-        "depth"
-      ],
+      "required": ["width", "height", "depth"],
       "properties": {
-        "width": {
-          "type": "number"
-        },
-        "height": {
-          "type": "number"
-        },
-        "depth": {
-          "type": "number"
-        }
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "depth": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "material": {
+      "type": "object",
+      "required": ["board_thickness", "back_thickness"],
+      "properties": {
+        "board_thickness": { "type": "number", "exclusiveMinimum": 0 },
+        "back_thickness": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
     "structure": {
       "type": "object",
+      "required": ["board_thickness"],
+      "properties": {
+        "board_thickness": { "type": "number", "exclusiveMinimum": 0 },
+        "side_panels": { "type": "boolean" },
+        "top_panel": { "type": "boolean" },
+        "bottom_panel": { "type": "boolean" }
+      }
+    },
+    "construction": {
+      "type": "object",
       "required": [
-        "board_thickness"
+        "shell_mode",
+        "columns",
+        "back_panel",
+        "outer_width",
+        "outer_height",
+        "outer_depth",
+        "internal_clear_width",
+        "internal_clear_height",
+        "section_width",
+        "remaining_height",
+        "horizontal_length",
+        "side_height",
+        "divider_height",
+        "is_viable"
       ],
       "properties": {
-        "board_thickness": {
-          "type": "number"
-        },
-        "side_panels": {
-          "type": "boolean"
-        },
-        "top_panel": {
-          "type": "boolean"
-        },
-        "bottom_panel": {
-          "type": "boolean"
-        }
+        "shell_mode": { "type": "string", "enum": ["sides_outside", "top_bottom_outside"] },
+        "columns": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "back_panel": { "type": "boolean" },
+        "outer_width": { "type": "number" },
+        "outer_height": { "type": "number" },
+        "outer_depth": { "type": "number" },
+        "internal_clear_width": { "type": "number" },
+        "internal_clear_height": { "type": "number" },
+        "section_width": { "type": "number" },
+        "required_opening_height": { "type": "number" },
+        "required_internal_height": { "type": "number" },
+        "remaining_height": { "type": "number" },
+        "side_height": { "type": "number" },
+        "horizontal_length": { "type": "number" },
+        "divider_height": { "type": "number" },
+        "back_panel_width": { "type": "number" },
+        "divider_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "shelf_count": { "type": "integer", "minimum": 0 },
+        "is_viable": { "type": "boolean" }
       }
     },
     "dividers": {
       "type": "object",
       "properties": {
-        "center": {
-          "type": "boolean"
-        }
-      }
-    },
-    "solver": {
-      "type": "object",
-      "properties": {
-        "remaining_distribution": {
-          "type": "string",
-          "enum": [
-            "none",
-            "top_bottom_large",
-            "large_openings",
-            "uniform"
-          ]
-        }
+        "center": { "type": "boolean" },
+        "count": { "type": "integer", "minimum": 0, "maximum": 1 }
       }
     },
     "zones": {
@@ -85,95 +100,62 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": [
-          "type",
-          "clear_height",
-          "count"
-        ],
+        "required": ["type", "count", "clear_height"],
         "properties": {
-          "type": {
-            "type": "string"
-          },
-          "clear_height": {
-            "type": "number"
-          },
-          "count": {
-            "type": "integer"
-          }
+          "type": { "type": "string" },
+          "count": { "type": "integer", "minimum": 1 },
+          "clear_height": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "openings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "clear_height"],
+        "properties": {
+          "type": { "type": "string" },
+          "clear_height": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "solver": {
+      "type": "object",
+      "required": ["remaining_distribution"],
+      "properties": {
+        "remaining_distribution": {
+          "type": "string",
+          "enum": ["none", "uniform", "top_bottom_large", "large_openings"]
         }
       }
     },
     "back_panel": {
       "type": "object",
+      "required": ["enabled", "split_vertical_panels", "panel_width", "panel_height", "thickness"],
       "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "thickness": {
-          "type": "number"
-        },
-        "split": {
-          "type": "boolean"
-        },
-        "split_vertical_panels": {
-          "type": "boolean"
-        },
-        "panel_width": {
-          "type": "number"
-        },
-        "panel_height": {
-          "type": "number"
-        }
+        "enabled": { "type": "boolean" },
+        "split_vertical_panels": { "type": "boolean" },
+        "panel_width": { "type": "number", "exclusiveMinimum": 0 },
+        "panel_height": { "type": "number", "exclusiveMinimum": 0 },
+        "thickness": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
     "visualization": {
       "type": "object",
       "properties": {
-        "add_dvds": {
-          "type": "boolean"
+        "add_dvds": { "type": "boolean" },
+        "add_books": { "type": "boolean" },
+        "gap": { "type": "number", "minimum": 0 },
+        "views": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["client", "carpentry"] }
         },
-        "dvd_width": {
-          "type": "number"
-        },
-        "dvd_height": {
-          "type": "number"
-        },
-        "dvd_depth": {
-          "type": "number"
-        },
-        "boxset_width": {
-          "type": "number"
-        },
-        "boxset_height": {
-          "type": "number"
-        },
-        "boxset_depth": {
-          "type": "number"
-        },
-        "add_books": {
-          "type": "boolean"
-        },
-        "book_small_width": {
-          "type": "number"
-        },
-        "book_small_height": {
-          "type": "number"
-        },
-        "book_small_depth": {
-          "type": "number"
-        },
-        "book_large_width": {
-          "type": "number"
-        },
-        "book_large_height": {
-          "type": "number"
-        },
-        "book_large_depth": {
-          "type": "number"
-        },
-        "gap": {
-          "type": "number"
-        }
+        "book_small_width": { "type": "number", "exclusiveMinimum": 0 },
+        "book_small_height": { "type": "number", "exclusiveMinimum": 0 },
+        "book_small_depth": { "type": "number", "exclusiveMinimum": 0 },
+        "book_large_width": { "type": "number", "exclusiveMinimum": 0 },
+        "book_large_height": { "type": "number", "exclusiveMinimum": 0 },
+        "book_large_depth": { "type": "number", "exclusiveMinimum": 0 }
       }
     }
   }

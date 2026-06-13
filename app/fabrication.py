@@ -34,20 +34,14 @@ COLORS = {
 }
 
 
-def make_piece(
-    name: str,
-    semantic: str,
-    width: float,
-    height: float,
-    thickness: float,
-) -> dict:
+def make_piece(name: str, semantic: str, width: float, height: float, thickness: float) -> dict:
     return {
         "name": name,
         "semantic": semantic,
-        "width": width,
-        "height": height,
-        "thickness": thickness,
-        "label": f"{name}\n{height:g}x{width:g}x{thickness:g}",
+        "width": float(width),
+        "height": float(height),
+        "thickness": float(thickness),
+        "label": f"{name}\n{int(round(height))}x{int(round(width))}x{int(round(thickness))}",
     }
 
 
@@ -55,378 +49,232 @@ def make_board(name: str, stock: dict) -> dict:
     return {
         "name": name,
         "material": stock["material"],
-        "width": stock["width"],
-        "height": stock["height"],
-        "thickness": stock["thickness"],
+        "width": float(stock["width"]),
+        "height": float(stock["height"]),
+        "thickness": float(stock["thickness"]),
         "pieces": [],
         "cuts": [],
         "remainders": [],
     }
 
 
-def place_piece(
-    board: dict,
-    piece: dict,
-    x: float,
-    y: float,
-    width: float | None = None,
-    height: float | None = None,
-) -> None:
-    board["pieces"].append(
-        {
-            "name": piece["name"],
-            "semantic": piece["semantic"],
-            "x": x,
-            "y": y,
-            "width": piece["width"] if width is None else width,
-            "height": piece["height"] if height is None else height,
-            "thickness": piece["thickness"],
-            "label": piece["label"],
-        }
+def _pack_pieces_into_boards(stock: dict, pieces: list[dict], prefix: str) -> list[dict]:
+    boards: list[dict] = []
+    sorted_pieces = sorted(
+        [deepcopy(piece) for piece in pieces],
+        key=lambda piece: (piece["height"], piece["width"]),
+        reverse=True,
     )
 
+    for piece in sorted_pieces:
+        placed = False
+        for board in boards:
+            x_cursor = board.setdefault("_x_cursor", 0.0)
+            y_cursor = board.setdefault("_y_cursor", 0.0)
+            row_height = board.setdefault("_row_height", 0.0)
 
-def add_vertical_cut(
-    board: dict,
-    x: float,
-    y: float = 0.0,
-    height: float | None = None,
-) -> None:
-    board["cuts"].append(
-        {
-            "type": "vertical",
-            "x": x,
-            "y": y,
-            "width": KERF_MM,
-            "height": board["height"] if height is None else height,
-        }
-    )
+            needed_width = piece["width"] + (KERF_MM if x_cursor > 0 else 0.0)
+            if x_cursor + needed_width <= stock["width"] and y_cursor + piece["height"] <= stock["height"]:
+                x = x_cursor + (KERF_MM if x_cursor > 0 else 0.0)
+                board["pieces"].append(
+                    {
+                        "name": piece["name"],
+                        "semantic": piece["semantic"],
+                        "x": x,
+                        "y": y_cursor,
+                        "width": piece["width"],
+                        "height": piece["height"],
+                        "thickness": piece["thickness"],
+                        "label": piece["label"],
+                    }
+                )
+                board["_x_cursor"] = x + piece["width"]
+                board["_row_height"] = max(row_height, piece["height"])
+                placed = True
+                break
 
+            new_y = y_cursor + row_height + KERF_MM
+            if new_y + piece["height"] <= stock["height"] and piece["width"] <= stock["width"]:
+                board["_x_cursor"] = piece["width"]
+                board["_y_cursor"] = new_y
+                board["_row_height"] = piece["height"]
+                board["pieces"].append(
+                    {
+                        "name": piece["name"],
+                        "semantic": piece["semantic"],
+                        "x": 0.0,
+                        "y": new_y,
+                        "width": piece["width"],
+                        "height": piece["height"],
+                        "thickness": piece["thickness"],
+                        "label": piece["label"],
+                    }
+                )
+                placed = True
+                break
 
-def add_horizontal_cut(
-    board: dict,
-    x: float,
-    y: float,
-    width: float,
-) -> None:
-    board["cuts"].append(
-        {
-            "type": "horizontal",
-            "x": x,
-            "y": y,
-            "width": width,
-            "height": KERF_MM,
-        }
-    )
+        if placed:
+            continue
 
+        if piece["width"] > stock["width"] or piece["height"] > stock["height"]:
+            raise ValueError(
+                f"Piece '{piece['name']}' ({piece['height']}x{piece['width']}) does not fit stock board "
+                f"{stock['height']}x{stock['width']}"
+            )
 
-def add_remainder(
-    board: dict,
-    x: float,
-    y: float,
-    width: float,
-    height: float,
-) -> None:
-    if width <= 0 or height <= 0:
-        return
+        board = make_board(f"{prefix} {len(boards) + 1}", stock)
+        board["_x_cursor"] = piece["width"]
+        board["_y_cursor"] = 0.0
+        board["_row_height"] = piece["height"]
+        board["pieces"].append(
+            {
+                "name": piece["name"],
+                "semantic": piece["semantic"],
+                "x": 0.0,
+                "y": 0.0,
+                "width": piece["width"],
+                "height": piece["height"],
+                "thickness": piece["thickness"],
+                "label": piece["label"],
+            }
+        )
+        boards.append(board)
 
-    board["remainders"].append(
-        {
-            "name": "REMAINING",
-            "semantic": "remaining",
-            "x": x,
-            "y": y,
-            "width": width,
-            "height": height,
-            "thickness": board["thickness"],
-            "label": f"REMAINING\n{height:g}x{width:g}",
-        }
-    )
+    for board in boards:
+        x_cursor = board.pop("_x_cursor", 0.0)
+        y_cursor = board.pop("_y_cursor", 0.0)
+        row_height = board.pop("_row_height", 0.0)
 
+        if x_cursor < stock["width"] and row_height > 0:
+            board["remainders"].append(
+                {
+                    "name": "REMAINING",
+                    "semantic": "remaining",
+                    "x": x_cursor + (KERF_MM if x_cursor > 0 else 0.0),
+                    "y": y_cursor,
+                    "width": max(stock["width"] - x_cursor - (KERF_MM if x_cursor > 0 else 0.0), 0.0),
+                    "height": row_height,
+                    "thickness": stock["thickness"],
+                    "label": "REMAINING",
+                }
+            )
 
-def find_piece(parts: list[dict], name: str) -> dict:
-    for item in parts:
-        if item["name"] == name:
-            return item
-    raise ValueError(f"Piece not found: {name}")
+        bottom_used = y_cursor + row_height
+        if bottom_used < stock["height"]:
+            board["remainders"].append(
+                {
+                    "name": "REMAINING",
+                    "semantic": "remaining",
+                    "x": 0.0,
+                    "y": bottom_used + (KERF_MM if bottom_used > 0 else 0.0),
+                    "width": stock["width"],
+                    "height": max(stock["height"] - bottom_used - (KERF_MM if bottom_used > 0 else 0.0), 0.0),
+                    "thickness": stock["thickness"],
+                    "label": "REMAINING",
+                }
+            )
 
-
-def place_two_stacked_shelves_in_column(
-    board: dict,
-    bottom_piece: dict,
-    top_piece: dict,
-    x: float,
-    fabrication_depth: float,
-    section_width: float,
-) -> None:
-    place_piece(
-        board,
-        bottom_piece,
-        x,
-        0.0,
-        width=fabrication_depth,
-        height=section_width,
-    )
-    add_horizontal_cut(board, x, section_width, fabrication_depth)
-
-    top_y = section_width + KERF_MM
-
-    place_piece(
-        board,
-        top_piece,
-        x,
-        top_y,
-        width=fabrication_depth,
-        height=section_width,
-    )
-    add_horizontal_cut(board, x, top_y + section_width, fabrication_depth)
-
-    add_remainder(
-        board,
-        x,
-        top_y + section_width + KERF_MM,
-        fabrication_depth,
-        PINE_BOARD["height"] - (top_y + section_width + KERF_MM),
-    )
-
-
-def place_four_shelves_with_full_top_strip(
-    board: dict,
-    bottom_left: dict,
-    bottom_right: dict,
-    top_left: dict,
-    top_right: dict,
-    fabrication_depth: float,
-    section_width: float,
-) -> None:
-    second_column_x = fabrication_depth + KERF_MM
-
-    place_piece(board, bottom_left, 0.0, 0.0, width=fabrication_depth, height=section_width)
-    place_piece(board, bottom_right, second_column_x, 0.0, width=fabrication_depth, height=section_width)
-
-    top_row_y = section_width + KERF_MM
-
-    place_piece(board, top_left, 0.0, top_row_y, width=fabrication_depth, height=section_width)
-    place_piece(board, top_right, second_column_x, top_row_y, width=fabrication_depth, height=section_width)
-
-    split_height = (section_width * 2) + KERF_MM
-
-    add_vertical_cut(board, fabrication_depth, height=split_height)
-    add_horizontal_cut(board, 0.0, section_width, PINE_BOARD["width"])
-    add_horizontal_cut(board, 0.0, top_row_y + section_width, PINE_BOARD["width"])
-
-    add_remainder(
-        board,
-        0.0,
-        top_row_y + section_width + KERF_MM,
-        PINE_BOARD["width"],
-        PINE_BOARD["height"] - (top_row_y + section_width + KERF_MM),
-    )
+    return boards
 
 
 def build_parts(request: dict) -> list[dict]:
-    fabrication_depth = float(request["fabrication_depth"])
-    cabinet_height = float(request["height"])
+    depth = float(request["fabrication_depth"])
+    outer_height = float(request["height"])
     board_thickness = float(request["board_thickness"])
     back_thickness = float(request["back_thickness"])
-    internal_horizontal = float(request["internal_horizontal"])
-    divider_height = cabinet_height - (2 * board_thickness)
-    section_width = (internal_horizontal - board_thickness) / 2
+    columns = int(request["columns"])
+    shell_mode = str(request["shell_mode"])
+    horizontal_length = float(request["horizontal_length"])
+    side_height = float(request["side_height"])
+    divider_height = float(request["divider_height"])
+    section_width = float(request["section_width"])
     shelf_levels = max(len(request["opening_heights"]) - 1, 0)
 
     parts = [
-        make_piece("LEFT SIDE", "side", fabrication_depth, cabinet_height, board_thickness),
-        make_piece("RIGHT SIDE", "side", fabrication_depth, cabinet_height, board_thickness),
-        make_piece("CENTER DIVIDER", "divider", fabrication_depth, divider_height, board_thickness),
-        make_piece("TOP PANEL", "top_bottom", fabrication_depth, internal_horizontal, board_thickness),
-        make_piece("BOTTOM PANEL", "top_bottom", fabrication_depth, internal_horizontal, board_thickness),
+        make_piece("LEFT SIDE", "side", depth, side_height, board_thickness),
+        make_piece("RIGHT SIDE", "side", depth, side_height, board_thickness),
+        make_piece("TOP PANEL", "top_bottom", depth, horizontal_length, board_thickness),
+        make_piece("BOTTOM PANEL", "top_bottom", depth, horizontal_length, board_thickness),
     ]
 
-    for index in range(1, shelf_levels + 1):
-        parts.append(make_piece(f"SHELF L{index}", "shelf", fabrication_depth, section_width, board_thickness))
-        parts.append(make_piece(f"SHELF R{index}", "shelf", fabrication_depth, section_width, board_thickness))
+    if columns == 2:
+        parts.append(make_piece("CENTER DIVIDER", "divider", depth, divider_height, board_thickness))
+
+    for level in range(1, shelf_levels + 1):
+        for column_name in ("L", "R")[:columns]:
+            parts.append(
+                make_piece(
+                    f"SHELF {column_name}{level}",
+                    "shelf",
+                    depth,
+                    section_width,
+                    board_thickness,
+                )
+            )
 
     if request["back_panel"]:
-        back_panel_width = (internal_horizontal + (2 * board_thickness)) / 2
-        parts.extend(
-            [
-                make_piece("BACK LEFT", "back", back_panel_width, cabinet_height, back_thickness),
-                make_piece("BACK RIGHT", "back", back_panel_width, cabinet_height, back_thickness),
-            ]
-        )
+        panel_width = float(request["back_panel_width"])
+        panel_count = columns if columns > 1 else 1
+        for index in range(panel_count):
+            suffix = f" {index + 1}" if panel_count > 1 else ""
+            parts.append(
+                make_piece(
+                    f"BACK PANEL{suffix}",
+                    "back",
+                    panel_width,
+                    outer_height,
+                    back_thickness,
+                )
+            )
 
     return parts
 
 
-def build_pine_boards(parts: list[dict], request: dict) -> list[dict]:
-    boards: list[dict] = []
-    fabrication_depth = float(request["fabrication_depth"])
-    internal_horizontal = float(request["internal_horizontal"])
-    cabinet_height = float(request["height"])
-    board_thickness = float(request["board_thickness"])
-    divider_height = cabinet_height - (2 * board_thickness)
-    section_width = (internal_horizontal - board_thickness) / 2
-    second_column_x = fabrication_depth + KERF_MM
-
-    left_side = find_piece(parts, "LEFT SIDE")
-    right_side = find_piece(parts, "RIGHT SIDE")
-    center_divider = find_piece(parts, "CENTER DIVIDER")
-    top_panel = find_piece(parts, "TOP PANEL")
-    bottom_panel = find_piece(parts, "BOTTOM PANEL")
-    shelves = [item for item in parts if item["semantic"] == "shelf"]
-
-    board = make_board("PINE BOARD 1", PINE_BOARD)
-    place_piece(board, left_side, 0.0, 0.0)
-    add_vertical_cut(board, fabrication_depth)
-    place_piece(board, right_side, second_column_x, 0.0)
-    boards.append(board)
-
-    board = make_board("PINE BOARD 2", PINE_BOARD)
-    place_piece(board, top_panel, 0.0, 0.0)
-    place_piece(board, bottom_panel, second_column_x, 0.0)
-    add_vertical_cut(board, fabrication_depth, height=internal_horizontal)
-    add_horizontal_cut(board, 0.0, internal_horizontal, PINE_BOARD["width"])
-    add_remainder(
-        board,
-        0.0,
-        internal_horizontal + KERF_MM,
-        PINE_BOARD["width"],
-        PINE_BOARD["height"] - internal_horizontal - KERF_MM,
-    )
-    boards.append(board)
-
-    if not shelves:
-        return boards
-
-    board = make_board("PINE BOARD 3", PINE_BOARD)
-    place_piece(board, center_divider, 0.0, 0.0)
-    add_horizontal_cut(board, 0.0, divider_height, fabrication_depth)
-    add_remainder(
-        board,
-        0.0,
-        divider_height + KERF_MM,
-        fabrication_depth,
-        PINE_BOARD["height"] - divider_height - KERF_MM,
-    )
-    add_vertical_cut(board, fabrication_depth)
-    place_two_stacked_shelves_in_column(
-        board,
-        shelves[0],
-        shelves[1],
-        second_column_x,
-        fabrication_depth,
-        section_width,
-    )
-    boards.append(board)
-
-    remaining_shelves = shelves[2:]
-    for chunk_index, start in enumerate(range(0, len(remaining_shelves), 4), start=4):
-        chunk = remaining_shelves[start : start + 4]
-        if len(chunk) < 4:
-            board = make_board(f"PINE BOARD {chunk_index}", PINE_BOARD)
-            y_cursor = 0.0
-            for piece in chunk:
-                place_piece(board, piece, 0.0, y_cursor, width=fabrication_depth, height=section_width)
-                y_cursor += section_width
-                add_horizontal_cut(board, 0.0, y_cursor, fabrication_depth)
-                y_cursor += KERF_MM
-            add_remainder(
-                board,
-                fabrication_depth + KERF_MM,
-                0.0,
-                PINE_BOARD["width"] - fabrication_depth - KERF_MM,
-                PINE_BOARD["height"],
-            )
-            boards.append(board)
-            continue
-
-        board = make_board(f"PINE BOARD {chunk_index}", PINE_BOARD)
-        place_four_shelves_with_full_top_strip(
-            board,
-            chunk[0],
-            chunk[1],
-            chunk[2],
-            chunk[3],
-            fabrication_depth,
-            section_width,
-        )
-        boards.append(board)
-
-    return boards
+def build_pine_boards(parts: list[dict]) -> list[dict]:
+    pine_parts = [piece for piece in parts if piece["semantic"] != "back"]
+    return _pack_pieces_into_boards(PINE_BOARD, pine_parts, "PINE BOARD")
 
 
-def build_back_boards(parts: list[dict], request: dict) -> list[dict]:
-    if not request["back_panel"]:
-        return []
-
-    boards: list[dict] = []
-    cabinet_height = float(request["height"])
-    board_thickness = float(request["board_thickness"])
-    internal_horizontal = float(request["internal_horizontal"])
-    back_panel_width = (internal_horizontal + (2 * board_thickness)) / 2
-
-    back_left = find_piece(parts, "BACK LEFT")
-    back_right = find_piece(parts, "BACK RIGHT")
-
-    for index, back_piece in enumerate([back_left, back_right], start=1):
-        board = make_board(f"BACK BOARD {index}", BACK_BOARD)
-        place_piece(board, back_piece, 0.0, 0.0)
-        add_horizontal_cut(board, 0.0, cabinet_height, BACK_BOARD["width"])
-        add_vertical_cut(board, back_panel_width, height=cabinet_height)
-        add_remainder(
-            board,
-            0.0,
-            cabinet_height + KERF_MM,
-            BACK_BOARD["width"],
-            BACK_BOARD["height"] - cabinet_height - KERF_MM,
-        )
-        add_remainder(
-            board,
-            back_panel_width + KERF_MM,
-            0.0,
-            BACK_BOARD["width"] - back_panel_width - KERF_MM,
-            cabinet_height,
-        )
-        boards.append(board)
-
-    return boards
+def build_back_boards(parts: list[dict]) -> list[dict]:
+    back_parts = [piece for piece in parts if piece["semantic"] == "back"]
+    return _pack_pieces_into_boards(BACK_BOARD, back_parts, "BACK BOARD") if back_parts else []
 
 
 def build_payload(request: dict) -> dict:
-    internal_horizontal = float(request["internal_horizontal"])
-    cabinet_height = float(request["height"])
-    nominal_depth = float(request["depth"])
-    fabrication_depth = float(request["fabrication_depth"])
-    board_thickness = float(request["board_thickness"])
-    back_thickness = float(request["back_thickness"])
-    outer_width = internal_horizontal + (2 * board_thickness)
-    divider_height = cabinet_height - (2 * board_thickness)
-    section_width = (internal_horizontal - board_thickness) / 2
-    back_panel_width = outer_width / 2
-    shelf_levels = max(len(request["opening_heights"]) - 1, 0)
-
     parts = build_parts(request)
-    boards = build_pine_boards(parts, request) + build_back_boards(parts, request)
+    boards = build_pine_boards(parts) + build_back_boards(parts)
+
+    columns = int(request["columns"])
+    board_thickness = float(request["board_thickness"])
+    outer_width = float(request["outer_width"])
+    depth = float(request["depth"])
+    section_width = float(request["section_width"])
+    divider_height = float(request["divider_height"])
 
     payload = {
         "project_name": f"kerf_{request['project_name']}",
         "kerf_mm": KERF_MM,
         "cabinet": {
             "type": request["type"],
-            "variant": request.get("variant"),
-            "construction_type": "laterales continuos + horizontales entre laterales + separador central + trasera superpuesta dividida",
-            "internal_horizontal": internal_horizontal,
-            "horizontal_length": internal_horizontal,
+            "content_type": request["content_type"],
+            "shell_mode": request["shell_mode"],
+            "columns": columns,
+            "construction_type": (
+                "laterales exteriores + horizontales entre laterales"
+                if request["shell_mode"] == "sides_outside"
+                else "tapa/base exteriores + laterales entre horizontales"
+            ),
+            "horizontal_length": float(request["horizontal_length"]),
             "outer_width": outer_width,
-            "height": cabinet_height,
-            "depth": fabrication_depth,
-            "nominal_depth": nominal_depth,
+            "height": float(request["height"]),
+            "depth": float(request["fabrication_depth"]),
+            "nominal_depth": depth,
             "board_thickness": board_thickness,
-            "back_thickness": back_thickness,
+            "back_thickness": float(request["back_thickness"]),
             "divider_height": divider_height,
             "section_width": section_width,
-            "back_panel_width": back_panel_width,
-            "shelf_levels": shelf_levels,
+            "back_panel_width": float(request["back_panel_width"]),
+            "shelf_levels": max(len(request["opening_heights"]) - 1, 0),
             "opening_heights": deepcopy(request["opening_heights"]),
         },
         "colors": deepcopy(COLORS),
