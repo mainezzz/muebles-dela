@@ -2,9 +2,9 @@
   "project_name": "dvd_1960",
   "content_type": "dvd",
   "outer": {
-    "width": 1200,
+    "width": 2036,
     "height": 1960,
-    "depth": 190
+    "depth": 200
   },
   "material": {
     "board_thickness": 18,
@@ -13,30 +13,11 @@
   "construction": {
     "shell_mode": "sides_outside",
     "columns": 2,
-    "back_panel": true
+    "back_panel": true,
+    "has_center_divider": true
   },
   "layout": {
-    "distribution_mode": "symmetric",
-    "remaining_distribution": "top_bottom_large",
-    "opening_groups": [
-      {
-        "kind": "dvd_boxset",
-        "clear_height": 255,
-        "count": 2
-      },
-      {
-        "kind": "dvd",
-        "clear_height": 205,
-        "count": 6
-      }
-    ]
-  },
-  "visualization": {
-    "fill_contents": true,
-    "gap": 2,
-    "views": [
-      "client",
-      "carpentry"
-    ]
+    "distribution_mode": "manual",
+    "openings": [284, 205, 205, 205, 205, 205, 205, 284]
   }
 }
