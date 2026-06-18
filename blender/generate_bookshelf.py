@@ -1,3 +1,4 @@
+# blender/generate_bookshelf.py
 from __future__ import annotations
 
 import json
@@ -7,6 +8,7 @@ import sys
 from pathlib import Path
 
 import bpy
+from mathutils import Vector
 
 
 RANDOM_SEED = 42
@@ -24,6 +26,12 @@ def resolve_cli_paths() -> tuple[Path, Path]:
     output_dir = Path(argv[1]).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     return input_path, output_dir
+
+
+def resolve_project_root() -> Path:
+    if "__file__" in globals():
+        return Path(__file__).resolve().parent.parent
+    return Path.cwd()
 
 
 def mm(value: float) -> float:
@@ -61,6 +69,7 @@ def create_box(name: str, sx: float, sy: float, sz: float, x: float, y: float, z
     obj = bpy.context.object
     obj.name = name
     obj.scale = (mm(sx) / 2.0, mm(sy) / 2.0, mm(sz) / 2.0)
+
     bevel = obj.modifiers.new(name="Bevel", type="BEVEL")
     bevel.width = 0.0008
     bevel.segments = 2
@@ -103,8 +112,13 @@ def create_pine_material(base_dir: Path) -> bpy.types.Material:
     basecolor = pine_dir / "pine_basecolor.jpg"
     roughness = pine_dir / "pine_roughness.jpg"
     normal = pine_dir / "pine_normal.png"
+
     if not (basecolor.exists() and roughness.exists() and normal.exists()):
-        return make_material("pine_fallback", (0.73, 0.62, 0.52, 1.0), roughness=0.72)
+        return make_material("pine_fallback", (0.82, 0.76, 0.69, 1.0), roughness=0.72)
+
+    existing = bpy.data.materials.get("pine_wood")
+    if existing is not None:
+        return existing
 
     material = bpy.data.materials.new(name="pine_wood")
     material.use_nodes = True
@@ -123,6 +137,7 @@ def create_pine_material(base_dir: Path) -> bpy.types.Material:
 
     texcoord = nodes.new(type="ShaderNodeTexCoord")
     texcoord.location = (-850, 0)
+
     mapping = nodes.new(type="ShaderNodeMapping")
     mapping.location = (-620, 0)
     mapping.inputs["Scale"].default_value = (5.6, 1.0, 5.6)
@@ -143,7 +158,7 @@ def create_pine_material(base_dir: Path) -> bpy.types.Material:
 
     normal_map = nodes.new(type="ShaderNodeNormalMap")
     normal_map.location = (170, -250)
-    normal_map.inputs["Strength"].default_value = 0.32
+    normal_map.inputs["Strength"].default_value = 0.22
 
     links.new(texcoord.outputs["Generated"], mapping.inputs["Vector"])
     links.new(mapping.outputs["Vector"], tex_base.inputs["Vector"])
@@ -157,20 +172,26 @@ def create_pine_material(base_dir: Path) -> bpy.types.Material:
     return material
 
 
-def add_text(text: str, x: float, y: float, z: float, size: float, material: bpy.types.Material, align_x: str = "CENTER") -> bpy.types.Object:
+def add_text(
+    text: str,
+    x: float,
+    y: float,
+    z: float,
+    size: float,
+    material: bpy.types.Material,
+    align_x: str = "CENTER",
+) -> bpy.types.Object:
     bpy.ops.object.text_add(location=(mm(x), mm(y), mm(z)))
     obj = bpy.context.object
     obj.data.body = text
     obj.data.size = size
     obj.data.align_x = align_x
-    obj.rotation_euler[0] = 0.0
-    obj.rotation_euler[1] = 0.0
-    obj.rotation_euler[2] = 0.0
+    obj.data.extrude = 0.001
     apply_material(obj, material)
     return obj
 
 
-def setup_world() -> None:
+def setup_world(client_mode: bool) -> None:
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE_NEXT"
     scene.render.image_settings.file_format = "PNG"
@@ -178,48 +199,74 @@ def setup_world() -> None:
     scene.render.resolution_y = 1600
     scene.render.use_overwrite = True
     scene.eevee.taa_render_samples = 64
-    scene.eevee.use_gtao = True
-    scene.view_settings.exposure = -0.35
+
+    if hasattr(scene.eevee, "use_gtao"):
+        scene.eevee.use_gtao = True
+
+    if hasattr(scene.eevee, "use_bloom"):
+        scene.eevee.use_bloom = False
+
+    # bajar exposición para evitar imagen lavada/quemada
+    scene.view_settings.exposure = -0.55 if client_mode else -0.08
 
     if scene.world is None:
         scene.world = bpy.data.worlds.new("World")
+
     scene.world.use_nodes = True
     background = scene.world.node_tree.nodes["Background"]
-    background.inputs[0].default_value = (0.93, 0.94, 0.95, 1.0)
-    background.inputs[1].default_value = 0.85
+
+    if client_mode:
+        background.inputs[0].default_value = (0.92, 0.93, 0.94, 1.0)
+        background.inputs[1].default_value = 0.38
+    else:
+        background.inputs[0].default_value = (0.985, 0.985, 0.985, 1.0)
+        background.inputs[1].default_value = 0.18
 
 
 def setup_client_lights() -> None:
-    bpy.ops.object.light_add(type="AREA", location=(3.5, -4.0, 4.6))
+    bpy.ops.object.light_add(type="AREA", location=(2.8, -3.2, 3.6))
     key = bpy.context.object
-    key.data.energy = 1600
+    key.data.energy = 900
     key.data.shape = "RECTANGLE"
-    key.data.size = 3.5
-    key.data.size_y = 3.5
+    key.data.size = 2.8
+    key.data.size_y = 2.8
 
-    bpy.ops.object.light_add(type="AREA", location=(-2.8, -2.6, 3.2))
+    bpy.ops.object.light_add(type="AREA", location=(-2.2, -2.2, 2.6))
     fill = bpy.context.object
-    fill.data.energy = 700
+    fill.data.energy = 260
     fill.data.shape = "RECTANGLE"
-    fill.data.size = 2.5
-    fill.data.size_y = 2.5
+    fill.data.size = 2.0
+    fill.data.size_y = 2.0
 
 
 def setup_carpentry_lights() -> None:
     bpy.ops.object.light_add(type="SUN", location=(0.0, 0.0, 4.0))
     sun = bpy.context.object
-    sun.data.energy = 2.0
+    sun.data.energy = 1.2
 
 
 def create_floor(width: float, depth: float) -> None:
-    floor = create_plane("FLOOR", width * 2.5, depth * 3.5, width / 2.0, 0.0, 0.0)
-    floor.rotation_euler[0] = 1.5708
-    apply_material(floor, make_material("floor_mat", (0.92, 0.92, 0.92, 1.0), roughness=0.96))
+    floor_width = width * 1.8
+    floor_depth = max(depth * 8.0, 1400.0)
+
+    # plano horizontal real, ligeramente por debajo del mueble
+    floor = create_plane(
+        "FLOOR",
+        floor_width,
+        floor_depth,
+        width / 2.0,
+        0.0,
+        -2.0,
+    )
+
+    # NO rotar: el primitive_plane_add ya nace horizontal en XY
+    apply_material(floor, make_material("floor_mat", (0.93, 0.93, 0.93, 1.0), roughness=0.98))
 
 
 def expand_openings(spec: dict) -> list[dict]:
     if spec.get("openings"):
         return [dict(item) for item in spec["openings"]]
+
     openings: list[dict] = []
     for zone in spec["zones"]:
         count = int(zone.get("count", 1))
@@ -237,6 +284,7 @@ def calculate_geometry(spec: dict) -> dict:
     width = float(dimensions["width"])
     height = float(dimensions["height"])
     depth = float(dimensions["depth"])
+
     divider_count = max(columns - 1, 0)
     internal_clear_width = width - (2 * board_thickness) - (divider_count * board_thickness)
     section_width = internal_clear_width / columns
@@ -244,6 +292,7 @@ def calculate_geometry(spec: dict) -> dict:
     horizontal_length = width - (2 * board_thickness) if shell_mode == "sides_outside" else width
     side_height = height if shell_mode == "sides_outside" else height - (2 * board_thickness)
     divider_height = height - (2 * board_thickness)
+
     return {
         "width": width,
         "height": height,
@@ -268,6 +317,7 @@ def get_sections(geometry: dict) -> list[dict]:
 
     if columns == 1:
         return [{"name": "C1", "x_start": t, "x_end": width - t, "width": section_width}]
+
     return [
         {"name": "L", "x_start": t, "x_end": t + section_width, "width": section_width},
         {"name": "R", "x_start": width - t - section_width, "x_end": width - t, "width": section_width},
@@ -300,6 +350,7 @@ def distribute_remaining_space(openings: list[dict], remaining: float, mode: str
         extra = remaining / len(adjusted)
         for opening in adjusted:
             opening["clear_height"] += extra
+
     return adjusted
 
 
@@ -338,7 +389,7 @@ def create_structure(geometry: dict, mats: dict[str, bpy.types.Material]) -> Non
         apply_material(divider, mats["wood"])
 
 
-def create_shelves(spec: dict, geometry: dict, openings: list[dict], mats: dict[str, bpy.types.Material]) -> None:
+def create_shelves(geometry: dict, openings: list[dict], mats: dict[str, bpy.types.Material]) -> None:
     sections = get_sections(geometry)
     t = geometry["board_thickness"]
     depth = geometry["depth"]
@@ -374,14 +425,16 @@ def create_back_panels(spec: dict, geometry: dict, mats: dict[str, bpy.types.Mat
     t_back = float(back_panel.get("thickness", 5.0))
     columns = geometry["columns"]
 
+    y_pos = (depth / 2.0) + (t_back / 2.0)
+
     if columns == 1:
-        panel = create_box("BACK_PANEL", width, t_back, height, width / 2.0, -(depth / 2.0) + t_back / 2.0, height / 2.0)
+        panel = create_box("BACK_PANEL", width, t_back, height, width / 2.0, y_pos, height / 2.0)
         apply_material(panel, mats["back"])
         return
 
     panel_width = width / 2.0
-    left = create_box("BACK_LEFT", panel_width, t_back, height, panel_width / 2.0, -(depth / 2.0) + t_back / 2.0, height / 2.0)
-    right = create_box("BACK_RIGHT", panel_width, t_back, height, width - panel_width / 2.0, -(depth / 2.0) + t_back / 2.0, height / 2.0)
+    left = create_box("BACK_LEFT", panel_width, t_back, height, panel_width / 2.0, y_pos, height / 2.0)
+    right = create_box("BACK_RIGHT", panel_width, t_back, height, width - panel_width / 2.0, y_pos, height / 2.0)
     apply_material(left, mats["back"])
     apply_material(right, mats["back"])
 
@@ -407,7 +460,7 @@ def _get_item_dimensions(spec: dict, opening_type: str) -> tuple[float, float, f
     return 20.0, 200.0, 140.0
 
 
-def populate_contents(spec: dict, geometry: dict, openings: list[dict], mats: dict[str, bpy.types.Material]) -> dict[str, int]:
+def populate_contents(spec: dict, geometry: dict, openings: list[dict]) -> dict[str, int]:
     visualization = spec.get("visualization", {})
     add_dvds = visualization.get("add_dvds", False)
     add_books = visualization.get("add_books", False)
@@ -416,9 +469,8 @@ def populate_contents(spec: dict, geometry: dict, openings: list[dict], mats: di
 
     counts = {"dvd_count": 0, "book_count": 0, "boxset_count": 0}
     sections = get_sections(geometry)
-    t = geometry["board_thickness"]
     gap = float(visualization.get("gap", 2.0))
-    current_z = t
+    current_z = geometry["board_thickness"]
 
     random.seed(RANDOM_SEED)
 
@@ -426,16 +478,18 @@ def populate_contents(spec: dict, geometry: dict, openings: list[dict], mats: di
         clear_height = float(opening["clear_height"])
         opening_type = str(opening["type"])
         item_width, item_height, item_depth = _get_item_dimensions(spec, opening_type)
-        usable_z = current_z + clear_height / 2.0
         base_z = current_z
+
         for section in sections:
             usable_width = section["width"] - (2.0 * gap)
             usable_depth = geometry["depth"] - gap - 10.0
             count = max(int(usable_width // (item_width + gap)), 0)
+
             for item_index in range(count):
                 x = section["x_start"] + gap + item_width / 2.0 + item_index * (item_width + gap)
                 y = -(geometry["depth"] / 2.0) + item_depth / 2.0 + gap + 10.0
                 z = base_z + min(item_height, clear_height) / 2.0
+
                 obj = create_box(
                     f"ITEM_{section['name']}_{opening_index}_{item_index}",
                     item_width,
@@ -445,41 +499,46 @@ def populate_contents(spec: dict, geometry: dict, openings: list[dict], mats: di
                     y,
                     z,
                 )
+
                 hue = (item_index % 8) / 8.0
-                color = (0.25 + hue * 0.6, 0.25 + (1 - hue) * 0.4, 0.35 + hue * 0.3, 1.0)
-                apply_material(obj, make_material(f"content_{opening_type}_{item_index % 8}", color, roughness=0.8))
+                color = (0.38 + hue * 0.25, 0.44 + (1 - hue) * 0.18, 0.48 + hue * 0.18, 1.0)
+                apply_material(obj, make_material(f"content_{opening_type}_{item_index % 8}", color, roughness=0.88))
+
                 if opening_type == "dvd":
                     counts["dvd_count"] += 1
                 elif opening_type == "dvd_boxset":
                     counts["boxset_count"] += 1
                 else:
                     counts["book_count"] += 1
-        current_z += clear_height + t
+
+        current_z += clear_height + geometry["board_thickness"]
 
     return counts
 
 
-def setup_camera_perspective(name: str, location: tuple[float, float, float], target: tuple[float, float, float]) -> bpy.types.Object:
+def setup_camera_perspective(name: str, location: tuple[float, float, float], target: tuple[float, float, float], lens: float) -> bpy.types.Object:
     bpy.ops.object.camera_add(location=tuple(mm(value) for value in location))
     camera = bpy.context.object
     camera.name = name
-    direction = (
-        mm(target[0]) - camera.location.x,
-        mm(target[1]) - camera.location.y,
-        mm(target[2]) - camera.location.z,
+    direction = Vector(
+        (
+            mm(target[0]) - camera.location.x,
+            mm(target[1]) - camera.location.y,
+            mm(target[2]) - camera.location.z,
+        )
     )
-    camera.rotation_euler = bpy.mathutils.Vector(direction).to_track_quat("-Z", "Y").to_euler()
-    camera.data.lens = 44
+    camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+    camera.data.lens = lens
     return camera
 
 
-def setup_camera_front(name: str, width: float, height: float) -> bpy.types.Object:
-    bpy.ops.object.camera_add(location=(mm(width / 2.0), mm(-1700.0), mm(height / 2.0)))
+def setup_camera_front(name: str, width: float, height: float, distance_mm: float, ortho_scale_factor: float) -> bpy.types.Object:
+    bpy.ops.object.camera_add(location=(mm(width / 2.0), mm(-distance_mm), mm(height / 2.0)))
     camera = bpy.context.object
     camera.name = name
     camera.rotation_euler = (1.5708, 0.0, 0.0)
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = mm(max(width * 1.15, height * 1.25))
+    camera.data.ortho_scale = mm(max(width * ortho_scale_factor, height * (ortho_scale_factor + 0.08)))
     return camera
 
 
@@ -501,50 +560,46 @@ def export_glb(path: Path) -> None:
     bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", use_visible=True)
 
 
-def add_carpentry_annotations(spec: dict, geometry: dict, openings: list[dict], mats: dict[str, bpy.types.Material]) -> None:
+def add_carpentry_annotations(geometry: dict, openings: list[dict], mats: dict[str, bpy.types.Material]) -> None:
     width = geometry["width"]
     height = geometry["height"]
+    depth = geometry["depth"]
     section_width = geometry["section_width"]
-    columns = geometry["columns"]
     t = geometry["board_thickness"]
-
     text_mat = mats["text"]
-    add_text(f"ANCHO TOTAL: {int(round(width))} mm", width / 2.0, -40.0, height + 80.0, 0.08, text_mat)
-    add_text(f"ALTO TOTAL: {int(round(height))} mm", width + 140.0, -40.0, height / 2.0, 0.08, text_mat, align_x="LEFT")
-    add_text(f"FONDO: {int(round(geometry['depth']))} mm", width / 2.0, -40.0, -70.0, 0.065, text_mat)
 
-    if columns >= 1:
-        add_text(f"ANCHO HUECO: {int(round(section_width))} mm", width / 2.0, -40.0, 40.0, 0.055, text_mat)
+    add_text(f"ANCHO TOTAL {int(round(width))} mm", width / 2.0, -(depth / 2.0) - 60.0, height + 80.0, 0.05, text_mat)
+    add_text(f"ALTO TOTAL {int(round(height))} mm", width + 90.0, -(depth / 2.0) - 60.0, height / 2.0, 0.05, text_mat, align_x="LEFT")
+    add_text(f"FONDO {int(round(depth))} mm", width / 2.0, -(depth / 2.0) - 60.0, -60.0, 0.042, text_mat)
+    add_text(f"ANCHO HUECO {int(round(section_width))} mm", width / 2.0, -(depth / 2.0) - 60.0, 20.0, 0.038, text_mat)
 
     current_z = t
-    for index, opening in enumerate(openings, start=1):
+    for opening in openings:
         clear_height = float(opening["clear_height"])
         center_z = current_z + clear_height / 2.0
-        add_text(
-            f"{int(round(clear_height))} mm",
-            -110.0,
-            -40.0,
-            center_z,
-            0.045,
-            text_mat,
-            align_x="LEFT",
-        )
+        add_text(f"{int(round(clear_height))}", -70.0, -(depth / 2.0) - 60.0, center_z, 0.034, text_mat, align_x="RIGHT")
         current_z += clear_height + t
 
 
-def build_scene(spec: dict, base_dir: Path, carpentry: bool) -> dict[str, int]:
+def build_scene(spec: dict, base_dir: Path, carpentry: bool, include_floor: bool = False) -> dict[str, int]:
     geometry = calculate_geometry(spec)
     openings = expand_openings(spec)
     remaining_mode = str(spec.get("solver", {}).get("remaining_distribution", "none"))
     remaining = float(geometry["internal_clear_height"]) - (
-        sum(float(item["clear_height"]) for item in openings) + max(len(openings) - 1, 0) * geometry["board_thickness"]
+        sum(float(item["clear_height"]) for item in openings)
+        + max(len(openings) - 1, 0) * geometry["board_thickness"]
     )
     openings = distribute_remaining_space(openings, remaining, remaining_mode)
 
     clear_scene()
-    setup_world()
+    setup_world(client_mode=not carpentry)
 
-    wood_mat = create_pine_material(base_dir) if not carpentry else make_material("wood_carpentry", (0.87, 0.74, 0.56, 1.0), 0.78)
+    wood_mat = (
+        create_pine_material(base_dir)
+        if not carpentry
+        else make_material("wood_carpentry", (0.87, 0.74, 0.56, 1.0), 0.78)
+    )
+
     mats = {
         "wood": wood_mat,
         "back": make_material("back_panel", (0.87, 0.87, 0.87, 1.0), 0.94),
@@ -554,10 +609,16 @@ def build_scene(spec: dict, base_dir: Path, carpentry: bool) -> dict[str, int]:
     create_structure(geometry, mats)
     create_shelves(spec, geometry, openings, mats)
     create_back_panels(spec, geometry, mats)
-    counts = populate_contents(spec, geometry, openings, mats) if not carpentry else {"dvd_count": 0, "book_count": 0, "boxset_count": 0}
+
+    counts = (
+        populate_contents(spec, geometry, openings, mats)
+        if not carpentry
+        else {"dvd_count": 0, "book_count": 0, "boxset_count": 0}
+    )
 
     if not carpentry:
-        create_floor(geometry["width"], geometry["depth"])
+        if include_floor:
+            create_floor(geometry["width"], geometry["depth"])
         setup_client_lights()
     else:
         setup_carpentry_lights()
@@ -566,13 +627,13 @@ def build_scene(spec: dict, base_dir: Path, carpentry: bool) -> dict[str, int]:
     return counts
 
 
-def save_report(output_dir: Path, spec: dict, geometry: dict, counts: dict[str, int]) -> None:
+def save_report(output_dir: Path, spec: dict, geometry: dict, openings: list[dict], counts: dict[str, int]) -> None:
     report = {
         "project_name": spec["project_name"],
         "content_type": spec["content_type"],
         "construction": spec["construction"],
         "overall_dimensions": spec["overall_dimensions"],
-        "opening_heights": [float(item["clear_height"]) for item in expand_openings(spec)],
+        "opening_heights": [float(item["clear_height"]) for item in openings],
         "counts": counts,
         "remaining_distribution": spec.get("solver", {}).get("remaining_distribution", "none"),
     }
@@ -584,15 +645,18 @@ def main() -> None:
     spec = json.loads(input_path.read_text(encoding="utf-8"))
     base_dir = Path.cwd()
 
-    counts = build_scene(spec, base_dir, carpentry=False)
     geometry = calculate_geometry(spec)
 
+    # 1) frontal cliente SIN suelo
+    counts = build_scene(spec, base_dir, carpentry=False, include_floor=False)
     client_front = setup_camera_front("CAM_CLIENT_FRONT", geometry["width"], geometry["height"])
     render_to_file(output_dir / "render_client_front.png", client_front)
 
+    # 2) perspectiva cliente CON suelo
+    build_scene(spec, base_dir, carpentry=False, include_floor=True)
     client_angle = setup_camera_perspective(
         "CAM_CLIENT_ANGLE",
-        (geometry["width"] * 1.45, -geometry["depth"] * 5.0, geometry["height"] * 0.72),
+        (geometry["width"] * 1.35, -geometry["depth"] * 6.0, geometry["height"] * 0.62),
         (geometry["width"] / 2.0, 0.0, geometry["height"] * 0.48),
     )
     render_to_file(output_dir / "render_client_angle.png", client_angle)
@@ -601,12 +665,12 @@ def main() -> None:
     export_glb(output_dir / f"{spec['project_name']}.glb")
     save_report(output_dir, spec, geometry, counts)
 
-    build_scene(spec, base_dir, carpentry=True)
+    # 3) plano carpintería
+    build_scene(spec, base_dir, carpentry=True, include_floor=False)
     carpentry_camera = setup_camera_front("CAM_CARPENTRY", geometry["width"], geometry["height"])
     render_to_file(output_dir / "plano_carpinteria.png", carpentry_camera)
 
     print(f"DONE -> {output_dir}")
-
 
 if __name__ == "__main__":
     main()
