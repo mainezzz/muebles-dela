@@ -1,5 +1,4 @@
-# blender/generate_kerf_layout.py
-
+# FILE: blender/generate_kerf_layout.py
 from __future__ import annotations
 
 import json
@@ -26,7 +25,7 @@ def resolve_cli_paths() -> tuple[Path, Path]:
     if "--" not in sys.argv:
         raise SystemExit("Uso: blender --background --python script.py -- input.json output_dir")
 
-    argv = sys.argv[sys.argv.index("--") + 1:]
+    argv = sys.argv[sys.argv.index("--") + 1 :]
     if len(argv) < 2:
         raise SystemExit("Faltan argumentos: input_json output_dir")
 
@@ -1387,7 +1386,7 @@ def render_overview(output_path: Path, data: dict) -> None:
 
 def main() -> None:
     input_json, output_dir = resolve_cli_paths()
-    data = json.loads(input_json.read_text(encoding="utf-8"))
+    data = json.loads(input_json.read_text(encoding="utf-8-sig"))
 
     render_single_view(
         output_dir / "01_board_layout.png",
